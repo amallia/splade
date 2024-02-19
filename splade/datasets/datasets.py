@@ -6,7 +6,7 @@ import random
 import zstandard as zstd
 import io
 
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, IterableDataset
 from tqdm.auto import tqdm
 from tqdm.auto import tqdm
 
@@ -65,7 +65,7 @@ class DistilPairsDatasetPreLoad(Dataset):
         return self.data_dict[idx]
 
 
-class CollectionDatasetPreLoad(Dataset):
+class CollectionDatasetPreLoad(IterableDataset):
     """
     dataset to iterate over a document/query collection, format per line: format per line: doc_id \t doc
     we preload everything in memory at init
@@ -77,45 +77,15 @@ class CollectionDatasetPreLoad(Dataset):
         self.files = [os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith('.json.zstd')]
         self.files.sort()  # Ensure consistent order
 
-        self.index = self._build_index()
-
-    def _build_index(self):
-        # This function builds an index to quickly find which file and line number a given index corresponds to
-        index = []
-        line_count = 0
-        for file_path in tqdm(self.files):
+    def __iter__(self):
+        for file_path in self.files:
             with open(file_path, 'rb') as fh:
                 dctx = zstd.ZstdDecompressor()
                 with dctx.stream_reader(fh) as reader:
                     text_stream = io.TextIOWrapper(reader, encoding='utf-8')
-                    file_lines = sum(1 for _ in text_stream)
-                    index.append((file_path, line_count, line_count + file_lines))
-                    line_count += file_lines
-        return index
-
-    def __len__(self):
-        # Returns the total number of lines across all files
-        if self.index:
-            _, _, total_lines = self.index[-1]
-            return total_lines
-        return 0
-
-
-    def __getitem__(self, idx):
-        # Finds the correct file and line number for the given index
-        for file_path, start_idx, end_idx in self.index:
-            if start_idx <= idx < end_idx:
-                line_number = idx - start_idx
-                with open(file_path, 'rb') as fh:
-                    dctx = zstd.ZstdDecompressor()
-                    with dctx.stream_reader(fh) as reader:
-                        text_stream = io.TextIOWrapper(reader, encoding='utf-8')
-                        for _ in range(line_number):
-                            next(text_stream)  # Skip lines until the desired one
-                        line = next(text_stream)
+                    for line in text_stream:
                         js_obj = json.loads(line)  # Assuming each line is a valid JSON object
-                        return js_obj['id'], js_obj['text']
-        raise IndexError("Index out of bounds")
+                        yield js_obj['id'], js_obj['text']
 
 
 class BeirDataset(Dataset):

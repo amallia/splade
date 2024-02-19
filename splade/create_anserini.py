@@ -27,7 +27,7 @@ def index(exp_dict: DictConfig):
     d_loader = TextCollectionDataLoader(dataset=d_collection, tokenizer_type=model_training_config["tokenizer_type"],
                                         max_length=model_training_config["max_length"],
                                         batch_size=config["index_retrieve_batch_size"],
-                                        shuffle=False, num_workers=4)
+                                        shuffle=False, num_workers=1)
     evaluator = EncodeAnserini(model, config)
     evaluator.index(d_loader)
     # q_collection = CollectionDatasetPreLoad(data_dir=exp_dict["data"]["Q_COLLECTION_PATH"][0], id_style="row_id")
