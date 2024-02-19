@@ -210,7 +210,7 @@ class EncodeAnserini(Evaluator):
         else:
             self.filename = "docs_anserini.jsonl" if self.input_type == "document" else "queries_anserini.tsv"
 
-    def index(self, collection_loader, quantization_factor=2):
+    def index(self, collection_loader):
         vocab_dict = collection_loader.tokenizer.get_vocab()
         vocab_dict = {v: k for k, v in vocab_dict.items()}
         collection_file = open(os.path.join(self.out_dir, self.filename), "w")
@@ -222,23 +222,23 @@ class EncodeAnserini(Evaluator):
                     inputs[k] = v.to(self.device)
                 batch_rep = self.model(**{self.arg_key: inputs})[self.output_key].cpu().numpy()
                 for rep, id_, text in zip(batch_rep, batch["id"], batch["text"]):
-                    id_ = id_.item()
+                    id_ = id_
                     idx = np.nonzero(rep)
                     # then extract values:
                     data = rep[idx]
-                    data = np.rint(data * quantization_factor).astype(int)
+                    # data = np.rint(data * quantization_factor).astype(int)
                     dict_splade = dict()
                     for id_token, value_token in zip(idx[0], data):
                         if value_token > 0:
                             real_token = vocab_dict[id_token]
-                            dict_splade[real_token] = int(value_token)
+                            dict_splade[real_token] = str(value_token)
                     if len(dict_splade.keys()) == 0:
                         print("empty input =>", id_)
                         dict_splade[vocab_dict[998]] = 1
                         # in case of empty doc we fill with "[unused993]" token (just to fill and avoid issues
                         # with anserini), in practice happens just a few times ...
                     if self.input_type == "document":
-                        dict_ = dict(id=id_, content=text, vector=dict_splade)
+                        dict_ = dict(id=id_, content="", vector=dict_splade)
                         json_dict = json.dumps(dict_)
                         collection_file.write(json_dict + "\n")
                     else:

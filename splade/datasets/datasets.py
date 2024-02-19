@@ -3,8 +3,11 @@ import json
 import os
 import pickle
 import random
+import zstandard as zstd
+import io
 
 from torch.utils.data import Dataset
+from tqdm.auto import tqdm
 from tqdm.auto import tqdm
 
 
@@ -68,34 +71,51 @@ class CollectionDatasetPreLoad(Dataset):
     we preload everything in memory at init
     """
 
-    def __init__(self, data_dir, id_style):
+    def __init__(self, data_dir):
         self.data_dir = data_dir
-        assert id_style in ("row_id", "content_id"), "provide valid id_style"
-        # id_style indicates how we access the doc/q (row id or doc/q id)
-        self.id_style = id_style
-        self.data_dict = {}
-        self.line_dict = {}
-        print("Preloading dataset")
-        with open(os.path.join(self.data_dir, "raw.tsv")) as reader:
-            for i, line in enumerate(tqdm(reader)):
-                if len(line) > 1:
-                    id_, *data = line.split("\t")  # first column is id
-                    data = " ".join(" ".join(data).splitlines())
-                    if self.id_style == "row_id":
-                        self.data_dict[i] = data
-                        self.line_dict[i] = id_.strip()
-                    else:
-                        self.data_dict[id_] = data.strip()
-        self.nb_ex = len(self.data_dict)
+        self.data_dir = data_dir
+        self.files = [os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith('.json.zstd')]
+        self.files.sort()  # Ensure consistent order
+
+        self.index = self._build_index()
+
+    def _build_index(self):
+        # This function builds an index to quickly find which file and line number a given index corresponds to
+        index = []
+        line_count = 0
+        for file_path in tqdm(self.files):
+            with open(file_path, 'rb') as fh:
+                dctx = zstd.ZstdDecompressor()
+                with dctx.stream_reader(fh) as reader:
+                    text_stream = io.TextIOWrapper(reader, encoding='utf-8')
+                    file_lines = sum(1 for _ in text_stream)
+                    index.append((file_path, line_count, line_count + file_lines))
+                    line_count += file_lines
+        return index
 
     def __len__(self):
-        return self.nb_ex
+        # Returns the total number of lines across all files
+        if self.index:
+            _, _, total_lines = self.index[-1]
+            return total_lines
+        return 0
+
 
     def __getitem__(self, idx):
-        if self.id_style == "row_id":
-            return self.line_dict[idx], self.data_dict[idx]
-        else:
-            return str(idx), self.data_dict[str(idx)]
+        # Finds the correct file and line number for the given index
+        for file_path, start_idx, end_idx in self.index:
+            if start_idx <= idx < end_idx:
+                line_number = idx - start_idx
+                with open(file_path, 'rb') as fh:
+                    dctx = zstd.ZstdDecompressor()
+                    with dctx.stream_reader(fh) as reader:
+                        text_stream = io.TextIOWrapper(reader, encoding='utf-8')
+                        for _ in range(line_number):
+                            next(text_stream)  # Skip lines until the desired one
+                        line = next(text_stream)
+                        js_obj = json.loads(line)  # Assuming each line is a valid JSON object
+                        return js_obj['id'], js_obj['text']
+        raise IndexError("Index out of bounds")
 
 
 class BeirDataset(Dataset):

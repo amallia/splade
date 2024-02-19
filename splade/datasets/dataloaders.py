@@ -117,7 +117,7 @@ class TextCollectionDataLoader(DataLoaderWrapper):
                                            max_length=self.max_length,
                                            return_attention_mask=True)
         return {**{k: torch.tensor(v) for k, v in processed_passage.items()},
-                "id": torch.tensor([int(i) for i in id_], dtype=torch.long),
+                "id": [str(i) for i in id_],
                 "text": d
                 }
 
